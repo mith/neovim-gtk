@@ -252,6 +252,7 @@ impl State {
 
     fn queue_draw_area<M: AsRef<ModelRect>>(&mut self, rect_list: &[M]) {
         // extends by items before, then after changes
+        // to rerender old ligatures and then new one
 
         let rects: Vec<_> = rect_list
             .iter()
@@ -262,20 +263,35 @@ impl State {
             })
             .collect();
 
-        self.update_dirty_glyphs();
+        render::shape_dirty(&self.font_ctx, &mut self.model, &self.color_model);
+
+        let surface = self.surface.as_ref().unwrap();
+        let buf_ctx = &surface.ctx;
+
+        surface.surface.flush();
 
         for mut rect in rects {
             rect.extend_by_items(&self.model);
-
             let (x, y, width, height) =
                 rect.to_area_extend_ink(&self.model, self.font_ctx.cell_metrics());
+
+            buf_ctx.save();
+            buf_ctx.rectangle(x as f64, y as f64, width as f64, height as f64);
+            buf_ctx.clip();
+
+            render::render(
+                &buf_ctx,
+                self.cursor.as_ref().unwrap(),
+                &self.font_ctx,
+                &self.model,
+                &self.color_model,
+                &self.mode,
+            );
+
+            buf_ctx.restore();
+
             self.drawing_area.queue_draw_area(x, y, width, height);
         }
-    }
-
-    #[inline]
-    fn update_dirty_glyphs(&mut self) {
-        render::shape_dirty(&self.font_ctx, &mut self.model, &self.color_model);
     }
 
     fn im_commit(&self, ch: &str) {
@@ -787,29 +803,8 @@ fn gtk_motion_notify(shell: &mut State, ui_state: &mut UiState, ev: &EventMotion
 fn gtk_draw(state_arc: &Arc<UiMutex<State>>, ctx: &cairo::Context) -> Inhibit {
     let state = state_arc.borrow();
     if state.nvim.is_initialized() {
-
-        let (x1, y1, x2, y2) = ctx.clip_extents();
-        let surface = state.surface.as_ref().unwrap();
-        let buf_ctx = &surface.ctx;
-
-        surface.surface.flush();
-
-        buf_ctx.save();
-        buf_ctx.rectangle(x1, y1, x2 - x1, y2 - y1);
-        buf_ctx.clip();
-
-        render::render(
-            &buf_ctx,
-            state.cursor.as_ref().unwrap(),
-            &state.font_ctx,
-            &state.model,
-            &state.color_model,
-            &state.mode,
-        );
-
-        ctx.set_source_surface(&surface.surface, 0.0, 0.0);
+        ctx.set_source_surface(&state.surface.as_ref().unwrap().surface, 0.0, 0.0);
         ctx.paint();
-        buf_ctx.restore();
     } else if state.nvim.is_initializing() {
         draw_initializing(&*state, ctx);
     }
@@ -1021,8 +1016,12 @@ impl RedrawEvents for State {
     fn on_redraw(&mut self, mode: &RepaintMode) {
         match *mode {
             RepaintMode::All => {
-                self.update_dirty_glyphs();
-                self.drawing_area.queue_draw();
+                if self.model.is_empty() {
+                    self.drawing_area.queue_draw();
+                } else {
+                    let rect = self.model.size_rect();
+                    self.queue_draw_area(&[rect]);
+                }
             }
             RepaintMode::Area(ref rect) => self.queue_draw_area(&[rect]),
             RepaintMode::AreaList(ref list) => self.queue_draw_area(&list.list),

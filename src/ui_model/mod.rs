@@ -3,11 +3,10 @@ mod line;
 mod item;
 mod model_rect;
 
-pub use self::cell::{Cell, Attrs};
+pub use self::cell::{Attrs, Cell};
 pub use self::line::{Line, StyledLine};
 pub use self::item::Item;
 pub use self::model_rect::{ModelRect, ModelRectVec};
-
 
 pub struct UiModel {
     pub columns: usize,
@@ -55,6 +54,18 @@ impl UiModel {
         }
     }
 
+    pub fn size_rect(&self) -> ModelRect {
+        if self.rows == 0 || self.columns == 0 {
+            ModelRect::point(0, 0)
+        } else {
+            ModelRect::new(0, self.rows - 1, 0, self.columns - 1)
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.rows == 0 || self.columns == 0
+    }
+
     #[inline]
     pub fn model(&self) -> &[Line] {
         &self.model
@@ -84,7 +95,6 @@ impl UiModel {
         changed_region.join(&self.cur_point());
 
         changed_region
-
     }
 
     pub fn get_cursor(&self) -> (usize, usize) {
@@ -265,7 +275,6 @@ mod tests {
         assert_eq!(1, rect.list[0].left);
         assert_eq!(1, rect.list[0].bot);
         assert_eq!(1, rect.list[0].right);
-
 
         assert_eq!(5, rect.list[1].top);
         assert_eq!(5, rect.list[1].left);
